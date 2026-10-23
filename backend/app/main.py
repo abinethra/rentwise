@@ -3,8 +3,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import get_settings
 from app.db import Base, engine
 from app.routes import agreements
+
+settings = get_settings()
 
 # Configure logging format for standard development output
 logging.basicConfig(
@@ -30,12 +33,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Enable CORS for local frontend clients (Vite default 5173, etc.)
+# Improvement 3: Explicit CORS allow-list matching environment configuration with credentials
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -49,6 +52,13 @@ def health_check():
     return {
         "status": "healthy",
         "service": "RentWise Backend",
-        "stage": 1,
-        "features": ["sqlite_models", "pdf_pypdf_extraction", "photo_gemini_vision_ocr"],
+        "allowed_origins": settings.allowed_origins_list,
+        "rate_limit_per_minute": settings.rate_limit_per_minute,
+        "features": [
+            "sqlite_models",
+            "pdf_pypdf_extraction",
+            "photo_gemini_vision_ocr",
+            "rate_limiting",
+            "hardened_cors",
+        ],
     }

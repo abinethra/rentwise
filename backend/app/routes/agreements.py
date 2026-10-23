@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.gemini import extract_text_from_photo, analyze_rental_agreement
 from app.models import Agreement, Clause
+from app.rate_limiter import check_rate_limit
 from app.schemas import (
     TextExtractionResponse,
     AgreementReportResponse,
@@ -127,6 +128,7 @@ async def read_and_validate_file_stream(file: UploadFile, max_bytes: int) -> tup
     response_model=TextExtractionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Upload rental agreement (PDF or Photo) and extract text",
+    dependencies=[Depends(check_rate_limit)],
 )
 async def upload_and_extract_agreement(
     file: UploadFile = File(..., description="Rental agreement PDF file or document photo (PNG/JPEG/WEBP)"),
@@ -193,6 +195,7 @@ async def upload_and_extract_agreement(
     response_model=AgreementReportResponse,
     status_code=status.HTTP_200_OK,
     summary="Perform Stage 2 Gemini analysis on an extracted agreement",
+    dependencies=[Depends(check_rate_limit)],
 )
 def analyze_agreement_endpoint(
     agreement_id: int,

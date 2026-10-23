@@ -206,3 +206,52 @@ def test_prompt_injection_delimiter_breakout_neutralized():
     assert "<UNTRUSTED_DOCUMENT_TEXT>" not in clean_text
     assert "[TAG_NEUTRALIZED]" in clean_text
 
+
+def test_cors_preflight_and_allowed_origin():
+    """
+    Improvement 3 Security Verification:
+    Tests that CORS correctly reflects configured origins and permits credentials without wildcard vulnerabilities.
+    """
+    response = client.options(
+        "/agreements",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert response.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_rate_limiter_blocks_spam_requests():
+    """
+    Improvement 3 Security Verification:
+    Tests that the sliding-window rate limiter returns HTTP 429 Too Many Requests
+    with Retry-After header when an IP spams requests.
+    """
+    from app.rate_limiter import reset_rate_limits
+    from app.config import get_settings
+
+    reset_rate_limits()
+    settings = get_settings()
+
+    # Trigger requests up to limit
+    for _ in range(settings.rate_limit_per_minute):
+        res = client.get("/health")
+        assert res.status_code == 200
+
+    # Next call to rate-limited route MUST trigger 429
+    fake_pdf = io.BytesIO(b"%PDF-1.4\nMinimalValidPdfHeader")
+    exceeded_res = client.post(
+        "/agreements",
+        files={"file": ("test.pdf", fake_pdf, "application/pdf")},
+    )
+    assert exceeded_res.status_code == 429
+    assert "rate limit exceeded" in exceeded_res.json()["detail"].lower()
+    assert "retry-after" in exceeded_res.headers
+    
+    # Clean up for subsequent tests
+    reset_rate_limits()
+
+
