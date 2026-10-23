@@ -10,9 +10,11 @@ import {
   Sparkles, 
   ShieldCheck, 
   FileCode,
-  ArrowRight
+  ArrowRight,
+  FlaskConical,
+  AlertTriangle
 } from 'lucide-react';
-import { uploadAgreement, analyzeAgreement, DEMO_AGREEMENT } from '../api';
+import { uploadAgreement, analyzeAgreement, DEMO_AGREEMENT, FIVE_SAMPLE_AGREEMENTS } from '../api';
 
 export default function UploadPage() {
   const [file, setFile] = useState(null);
@@ -101,16 +103,16 @@ export default function UploadPage() {
     }
   };
 
-  const handleLoadDemo = () => {
+  const handleLoadSample = (sampleAgreement) => {
     setLoading(true);
-    setProgressStep('Loading curated sample lease agreement with 7 risk categories...');
+    setProgressStep(`Loading ${sampleAgreement.title}...`);
     setTimeout(() => {
-      navigate('/report', { state: { agreement: DEMO_AGREEMENT } });
-    }, 800);
+      navigate('/report', { state: { agreement: sampleAgreement } });
+    }, 600);
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-12 space-y-8">
+    <div className="max-w-4xl mx-auto px-4 py-12 space-y-10">
       {/* Page Header */}
       <div className="text-center space-y-3">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 text-xs font-semibold">
@@ -218,18 +220,8 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
-          <button
-            type="button"
-            onClick={handleLoadDemo}
-            disabled={loading}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm font-medium transition-all"
-          >
-            <FileCode className="w-4 h-4 text-slate-400" />
-            <span>Try Sample Agreement (No upload needed)</span>
-          </button>
-
+        {/* Action Button */}
+        <div className="flex justify-end pt-2">
           <button
             type="button"
             onClick={handleUploadAndAnalyze}
@@ -252,6 +244,69 @@ export default function UploadPage() {
             <span>Files validated & isolated before AI processing</span>
           </span>
           <span className="hidden sm:inline">FastAPI + pypdf + Gemini Vision OCR</span>
+        </div>
+      </div>
+
+      {/* Stage 5 Showcase: Test with 5 Curated Sample Agreements */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FlaskConical className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              Stage 5 Test Suite: Test With 5 Curated Sample Agreements
+            </h2>
+          </div>
+          <span className="text-xs text-slate-500 font-medium">Click any lease to audit instantly</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {FIVE_SAMPLE_AGREEMENTS.map((sample) => {
+            const isHigh = sample.overall_risk === 'high';
+            const isMed = sample.overall_risk === 'medium';
+
+            return (
+              <div
+                key={sample.id}
+                onClick={() => handleLoadSample(sample)}
+                className={`p-5 rounded-2xl bg-white dark:bg-slate-900 border transition-all cursor-pointer shadow-sm hover:shadow-md hover:scale-[1.01] flex flex-col justify-between ${
+                  isHigh 
+                    ? 'border-rose-200/80 dark:border-rose-950/60 hover:border-rose-400' 
+                    : isMed
+                    ? 'border-amber-200/80 dark:border-amber-950/60 hover:border-amber-400'
+                    : 'border-emerald-200/80 dark:border-emerald-950/60 hover:border-emerald-400'
+                }`}
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      {sample.title}
+                    </h3>
+                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                      isHigh
+                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                        : isMed
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                        : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                    }`}>
+                      {sample.overall_risk} Risk
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                    {sample.subtitle}
+                  </p>
+                </div>
+
+                <div className="pt-3 mt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-blue-600 dark:text-blue-400 font-medium">
+                  <span>{sample.clauses.length} Flagged Clauses • {sample.missing_protections.length} Missing</span>
+                  <div className="flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                    <span>Inspect Report</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
