@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🏠 RentWise
+# 𖡼.𖤣𖥧 RentWise 𖡼.𖤣𖥧
 
 ### Understand your rental agreement before you sign it.
 
