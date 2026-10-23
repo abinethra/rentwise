@@ -26,7 +26,6 @@ class UserResponse(UserBase):
 # -------------------------------------------------------------
 RiskLevel = Literal["low", "medium", "high"]
 
-# The required categories covering deposit, rent increase, notice period, lock-in, maintenance, eviction, subletting
 ClauseCategory = Literal[
     "deposit",
     "rent increase",
@@ -73,7 +72,7 @@ class ClauseResponse(BaseModel):
 
 
 # -------------------------------------------------------------
-# Gemini Analysis Schemas (Stage 2 Core)
+# Gemini Analysis Schemas (Stage 2 Output Contract)
 # -------------------------------------------------------------
 class AgreementAnalysisResult(BaseModel):
     """
@@ -96,7 +95,7 @@ class AgreementAnalysisResult(BaseModel):
 
 
 # -------------------------------------------------------------
-# Agreement Schemas & Responses
+# Agreement Schemas & Responses (Stage 3 Endpoints)
 # -------------------------------------------------------------
 class AgreementBase(BaseModel):
     filename: str
@@ -117,12 +116,37 @@ class TextExtractionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AgreementReportResponse(AgreementBase):
-    """Full analyzed agreement report with executive summary, risk score, clauses and missing protections."""
+class AgreementListItemResponse(AgreementBase):
+    """Summary item returned in the agreement history listing (GET /agreements)."""
     id: int
     status: str
     summary: Optional[str] = None
     overall_risk: Optional[str] = None
+    clause_count: int = 0
+    high_risk_count: int = 0
+    medium_risk_count: int = 0
+    low_risk_count: int = 0
+    missing_protections_count: int = 0
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgreementHistoryResponse(BaseModel):
+    """Paginated history wrapper for GET /agreements."""
+    total: int
+    limit: int
+    offset: int
+    items: List[AgreementListItemResponse]
+
+
+class AgreementReportResponse(AgreementBase):
+    """Full detailed agreement report for GET /agreements/{agreement_id}."""
+    id: int
+    status: str
+    summary: Optional[str] = None
+    overall_risk: Optional[str] = None
+    raw_text: Optional[str] = None
     missing_protections: List[str] = []
     clauses: List[ClauseResponse] = []
     created_at: datetime

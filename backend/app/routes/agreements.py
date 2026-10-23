@@ -1,14 +1,22 @@
 import io
 import logging
+from typing import Optional, List
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Query
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from app.config import get_settings
 from app.db import get_db
 from app.gemini import extract_text_from_photo, analyze_rental_agreement
 from app.models import Agreement, Clause
-from app.schemas import TextExtractionResponse, AgreementReportResponse
+from app.schemas import (
+    TextExtractionResponse,
+    AgreementReportResponse,
+    AgreementHistoryResponse,
+    AgreementListItemResponse,
+    ClauseResponse,
+)
 
 logger = logging.getLogger("rentwise.routes.agreements")
 settings = get_settings()
@@ -207,7 +215,176 @@ def analyze_agreement_endpoint(
         status=agreement.status,
         summary=agreement.summary,
         overall_risk=agreement.overall_risk,
+        raw_text=agreement.raw_text,
         missing_protections=agreement.missing_protections or [],
         clauses=agreement.clauses,
         created_at=agreement.created_at,
     )
+
+
+# =============================================================
+# Stage 3: GET Endpoints for History and Reports
+# =============================================================
+
+@router.get(
+    "",
+    response_model=AgreementHistoryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get paginated history of all uploaded and analyzed agreements",
+)
+def get_agreement_history(
+    limit: int = Query(default=20, ge=1, le=100, description="Maximum number of items to return"),
+    offset: int = Query(default=0, ge=0, description="Offset for pagination"),
+    risk: Optional[str] = Query(default=None, description="Filter by overall risk: low, medium, high"),
+    status_filter: Optional[str] = Query(default=None, alias="status", description="Filter by status: extracted, analyzed, failed"),
+    db: Session = Depends(get_db),
+):
+    """
+    Stage 3 History Endpoint:
+    Returns a sorted list of past agreements with calculated risk metrics and clause statistics.
+    Useful for populating the History tab and dashboard in the React frontend.
+    """
+    query = db.query(Agreement)
+
+    if risk:
+        query = query.filter(Agreement.overall_risk == risk.lower())
+
+    if status_filter:
+        query = query.filter(Agreement.status == status_filter.lower())
+
+    total = query.count()
+    agreements_page = (
+        query.order_by(desc(Agreement.created_at))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    items: List[AgreementListItemResponse] = []
+    for ag in agreements_page:
+        clauses = ag.clauses or []
+        high_cnt = sum(1 for c in clauses if (c.risk or "").lower() == "high")
+        med_cnt = sum(1 for c in clauses if (c.risk or "").lower() == "medium")
+        low_cnt = sum(1 for c in clauses if (c.risk or "").lower() == "low")
+        missing_cnt = len(ag.missing_protections or [])
+
+        items.append(
+            AgreementListItemResponse(
+                id=ag.id,
+                filename=ag.filename,
+                file_type=ag.file_type,
+                status=ag.status,
+                summary=ag.summary,
+                overall_risk=ag.overall_risk,
+                clause_count=len(clauses),
+                high_risk_count=high_cnt,
+                medium_risk_count=med_cnt,
+                low_risk_count=low_cnt,
+                missing_protections_count=missing_cnt,
+                created_at=ag.created_at,
+            )
+        )
+
+    return AgreementHistoryResponse(
+        total=total,
+        limit=limit,
+        offset=offset,
+        items=items,
+    )
+
+
+@router.get(
+    "/{agreement_id}",
+    response_model=AgreementReportResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get full detailed analysis report for a specific agreement",
+)
+def get_agreement_report(
+    agreement_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Stage 3 Report Endpoint:
+    Returns the complete report including full plain-English summary, overall risk rating,
+    all classified clauses with suggestions, missing tenant protections, and the original raw text.
+    """
+    agreement = db.query(Agreement).filter(Agreement.id == agreement_id).first()
+    if not agreement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agreement #{agreement_id} not found.",
+        )
+
+    return AgreementReportResponse(
+        id=agreement.id,
+        filename=agreement.filename,
+        file_type=agreement.file_type,
+        status=agreement.status,
+        summary=agreement.summary,
+        overall_risk=agreement.overall_risk,
+        raw_text=agreement.raw_text,
+        missing_protections=agreement.missing_protections or [],
+        clauses=agreement.clauses or [],
+        created_at=agreement.created_at,
+    )
+
+
+@router.get(
+    "/{agreement_id}/clauses",
+    response_model=List[ClauseResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Query clauses of an agreement filtered by category or risk",
+)
+def get_agreement_clauses(
+    agreement_id: int,
+    category: Optional[str] = Query(default=None, description="Filter by category: deposit, notice period, rent increase, etc."),
+    risk: Optional[str] = Query(default=None, description="Filter by risk: low, medium, high"),
+    db: Session = Depends(get_db),
+):
+    """
+    Stage 3 Clauses Query Endpoint:
+    Allows querying specific clauses directly. Used by the Negotiation and Checklist pages
+    to quickly focus on 'high' risk terms or specific categories like 'deposit'.
+    """
+    agreement = db.query(Agreement).filter(Agreement.id == agreement_id).first()
+    if not agreement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agreement #{agreement_id} not found.",
+        )
+
+    query = db.query(Clause).filter(Clause.agreement_id == agreement_id)
+
+    if category:
+        query = query.filter(Clause.category == category.lower())
+
+    if risk:
+        query = query.filter(Clause.risk == risk.lower())
+
+    return query.all()
+
+
+@router.delete(
+    "/{agreement_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Delete an agreement and its analyzed clauses from history",
+)
+def delete_agreement(
+    agreement_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Deletes an agreement and its associated clauses from the database.
+    Ensures tenants can manage and purge their uploaded document history.
+    """
+    agreement = db.query(Agreement).filter(Agreement.id == agreement_id).first()
+    if not agreement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agreement #{agreement_id} not found.",
+        )
+
+    db.delete(agreement)
+    db.commit()
+
+    return {"deleted": True, "agreement_id": agreement_id}
