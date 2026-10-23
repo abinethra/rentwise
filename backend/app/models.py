@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from app.db import Base
 
@@ -32,6 +32,9 @@ class Agreement(Base):
     file_type = Column(String(50), nullable=False)  # e.g. "application/pdf", "image/jpeg", "image/png"
     raw_text = Column(Text, nullable=False)
     status = Column(String(50), default="extracted", nullable=False)  # "extracted", "analyzed", "failed"
+    summary = Column(Text, nullable=True)  # Plain-language overview of the agreement
+    overall_risk = Column(String(20), nullable=True)  # "low", "medium", "high"
+    missing_protections = Column(JSON, nullable=True, default=list)  # Standard tenant protections absent from lease
     created_at = Column(DateTime, default=utc_now, nullable=False)
 
     # Relationships

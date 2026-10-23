@@ -1,14 +1,14 @@
 import io
 import logging
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Query
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.gemini import extract_text_from_photo
-from app.models import Agreement
-from app.schemas import TextExtractionResponse
+from app.gemini import extract_text_from_photo, analyze_rental_agreement
+from app.models import Agreement, Clause
+from app.schemas import TextExtractionResponse, AgreementReportResponse
 
 logger = logging.getLogger("rentwise.routes.agreements")
 settings = get_settings()
@@ -129,4 +129,85 @@ async def upload_and_extract_agreement(
         extracted_text=extracted_text,
         status=db_agreement.status,
         created_at=db_agreement.created_at,
+    )
+
+
+@router.post(
+    "/{agreement_id}/analyze",
+    response_model=AgreementReportResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Perform Stage 2 Gemini analysis on an extracted agreement",
+)
+def analyze_agreement_endpoint(
+    agreement_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Stage 2 Analysis Endpoint:
+    1. Loads the agreement from SQLite.
+    2. Validates that extracted raw_text exists.
+    3. Calls Gemini through google-genai SDK requesting validated JSON.
+    4. Enforces retry logic if initial response fails Pydantic schema validation.
+    5. Stores summary, overall risk, missing protections, and individual classified clauses.
+    6. Returns the full validated report.
+    """
+    agreement = db.query(Agreement).filter(Agreement.id == agreement_id).first()
+    if not agreement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agreement #{agreement_id} not found.",
+        )
+
+    if not agreement.raw_text or not agreement.raw_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agreement has no extracted text to analyze. Please re-upload the document.",
+        )
+
+    # Perform analysis with Gemini
+    try:
+        analysis_result = analyze_rental_agreement(agreement.raw_text)
+    except Exception as e:
+        logger.error(f"Analysis failed for agreement #{agreement_id}: {str(e)}")
+        agreement.status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI analysis failed: {str(e)}",
+        ) from e
+
+    # Clear previous clauses if re-analyzing an existing agreement to avoid duplicate entries
+    db.query(Clause).filter(Clause.agreement_id == agreement_id).delete()
+
+    # Save individual classified clauses
+    for clause_item in analysis_result.clauses:
+        clause_row = Clause(
+            agreement_id=agreement.id,
+            text=clause_item.text,
+            category=clause_item.category,
+            risk=clause_item.risk,
+            explanation=clause_item.explanation,
+            suggestion=clause_item.suggestion,
+        )
+        db.add(clause_row)
+
+    # Update agreement top-level analysis fields
+    agreement.summary = analysis_result.summary
+    agreement.overall_risk = analysis_result.overall_risk
+    agreement.missing_protections = analysis_result.missing_protections
+    agreement.status = "analyzed"
+
+    db.commit()
+    db.refresh(agreement)
+
+    return AgreementReportResponse(
+        id=agreement.id,
+        filename=agreement.filename,
+        file_type=agreement.file_type,
+        status=agreement.status,
+        summary=agreement.summary,
+        overall_risk=agreement.overall_risk,
+        missing_protections=agreement.missing_protections or [],
+        clauses=agreement.clauses,
+        created_at=agreement.created_at,
     )
