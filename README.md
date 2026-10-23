@@ -13,7 +13,7 @@ AI-powered rental agreement reviewer that flags risky clauses, explains them in 
 ![Google Gemini](https://img.shields.io/badge/Google_Gemini-4285F4?logo=google&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-**[Live Demo](#)** · **[Demo Video](#)** · **[Report a Bug](../../issues)**
+**[Live Demo](https://rentwise-one.vercel.app/)** · **[Report a Bug](../../issues)**
 
 </div>
 
@@ -36,7 +36,9 @@ Many tenants sign rental agreements without fully understanding them, which can 
 
 ## 🎬 Demo
 
-> Replace this with a GIF or screenshots of: upload an agreement, see the colour-coded report, open a negotiation message.
+<img width="1600" height="829" alt="image" src="https://github.com/user-attachments/assets/f38a695e-a548-4661-91b1-24da0810d55b" />
+<img width="1600" height="828" alt="image" src="https://github.com/user-attachments/assets/52c27678-fd33-4004-be80-c845edf51b00" />
+<img width="1600" height="821" alt="image" src="https://github.com/user-attachments/assets/4307c618-4e5b-4092-8a5e-8cae566b1d3c" />
 
 ![RentWise demo](docs/demo.gif)
 
