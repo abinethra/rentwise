@@ -1,0 +1,6 @@
+{
+  "name": "Student Portfolio Mentor",
+  "description": "Interactive workspace and mentoring environment for full-stack AI and Data Science portfolio projects.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
