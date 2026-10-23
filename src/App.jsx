@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import DisclaimerBanner from './components/DisclaimerBanner';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
+import BrickBackground from './components/BrickBackground';
 
 // Pages
 import LandingPage from './pages/LandingPage';
@@ -15,7 +16,10 @@ import HistoryPage from './pages/HistoryPage';
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen flex flex-col bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased selection:bg-blue-500 selection:text-white">
+      <div className="min-h-screen flex flex-col bg-[#ECDFD2] text-[#081849] font-body antialiased selection:bg-[#893172] selection:text-white relative">
+        {/* Interactive Toy-Brick City & Floating Bricks Parallax Canvas */}
+        <BrickBackground />
+
         {/* Rule 9: Prominent Tenant Guidance / Not Legal Advice Banner */}
         <DisclaimerBanner />
         
@@ -23,7 +27,7 @@ export default function App() {
         <Navbar />
 
         {/* Page Content Viewport */}
-        <main className="flex-1">
+        <main className="flex-1 relative z-0">
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/upload" element={<UploadPage />} />
