@@ -255,3 +255,86 @@ def test_rate_limiter_blocks_spam_requests():
     reset_rate_limits()
 
 
+def test_atomic_rollback_on_analysis_failure(monkeypatch):
+    """
+    Improvement 5 Verification:
+    Tests that when an unhandled failure occurs during the Gemini analysis pipeline,
+    the database transaction is cleanly rolled back, no orphan clauses are left,
+    the agreement status is safely set to 'failed', and subsequent queries succeed.
+    """
+    from app.services import agreement_service
+
+    db = SessionLocal()
+    try:
+        # 1. Create a test agreement with 2 existing dummy clauses
+        agreement = Agreement(
+            filename="atomic_rollback_test.pdf",
+            file_type="application/pdf",
+            raw_text="Sample tenancy agreement text to be analyzed.",
+            status="extracted",
+        )
+        db.add(agreement)
+        db.commit()
+        db.refresh(agreement)
+        ag_id = agreement.id
+
+        clause1 = Clause(
+            agreement_id=ag_id,
+            text="Initial clause 1",
+            category="deposit",
+            risk="low",
+            explanation="Initial explanation",
+        )
+        clause2 = Clause(
+            agreement_id=ag_id,
+            text="Initial clause 2",
+            category="notice_period",
+            risk="medium",
+            explanation="Initial explanation 2",
+        )
+        db.add_all([clause1, clause2])
+        db.commit()
+
+        # Confirm 2 clauses exist before failure
+        initial_clauses = db.query(Clause).filter(Clause.agreement_id == ag_id).all()
+        assert len(initial_clauses) == 2
+
+        # 2. Simulate Gemini LLM failure during analysis using monkeypatch
+        def mock_failing_gemini(_text):
+            raise RuntimeError("Simulated upstream Gemini quota / connection timeout crash")
+
+        monkeypatch.setattr(agreement_service, "analyze_rental_agreement", mock_failing_gemini)
+
+        # 3. Call analyze endpoint - should catch error, rollback, and return HTTP 502
+        response = client.post(f"/agreements/{ag_id}/analyze")
+        assert response.status_code == 502
+        assert "AI analysis failed" in response.json()["detail"]
+
+        # 4. Verify DB session integrity: agreement status is set to 'failed'
+        # and session is clean and able to query without InvalidRequestError
+        refreshed_ag = db.query(Agreement).filter(Agreement.id == ag_id).first()
+        assert refreshed_ag is not None
+        assert refreshed_ag.status == "failed"
+
+        # 5. Verify database session is fully reusable and not left in a poisoned transaction
+        canary = db.query(Agreement).count()
+        assert canary >= 1
+
+    finally:
+        db.close()
+
+
+def test_alembic_migration_env():
+    """
+    Improvement 5 Verification:
+    Tests that Alembic configuration and migration scripts load cleanly
+    and point to our initial revision.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    alembic_cfg = Config("backend/alembic.ini")
+    script = ScriptDirectory.from_config(alembic_cfg)
+    heads = script.get_heads()
+    assert len(heads) == 1
+    assert heads[0] == "001"

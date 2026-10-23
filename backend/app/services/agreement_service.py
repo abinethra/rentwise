@@ -59,39 +59,49 @@ def analyze_and_store_agreement(db: Session, agreement_id: int) -> Agreement:
 
     try:
         analysis_result = analyze_rental_agreement(agreement.raw_text)
+
+        # Clear previous clauses to avoid duplicate entries on re-analysis
+        db.query(Clause).filter(Clause.agreement_id == agreement_id).delete()
+
+        # Insert analyzed clauses
+        for clause_item in analysis_result.clauses:
+            clause_row = Clause(
+                agreement_id=agreement.id,
+                text=clause_item.text,
+                category=clause_item.category,
+                risk=clause_item.risk,
+                explanation=clause_item.explanation,
+                suggestion=clause_item.suggestion,
+            )
+            db.add(clause_row)
+
+        # Update top-level agreement analysis fields
+        agreement.summary = analysis_result.summary
+        agreement.overall_risk = analysis_result.overall_risk
+        agreement.missing_protections = analysis_result.missing_protections
+        agreement.status = "analyzed"
+
+        db.commit()
+        db.refresh(agreement)
+        return agreement
+
     except Exception as e:
         logger.error(f"Analysis service failed for agreement #{agreement_id}: {str(e)}")
-        agreement.status = "failed"
-        db.commit()
+        # Rollback uncommitted clause mutations to restore session integrity
+        db.rollback()
+
+        try:
+            agreement.status = "failed"
+            db.commit()
+            db.refresh(agreement)
+        except Exception as commit_err:
+            logger.error(f"Failed to record agreement failure status: {commit_err}")
+            db.rollback()
+
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"AI analysis failed: {str(e)}",
         ) from e
-
-    # Clear previous clauses to avoid duplicate entries on re-analysis
-    db.query(Clause).filter(Clause.agreement_id == agreement_id).delete()
-
-    # Insert analyzed clauses
-    for clause_item in analysis_result.clauses:
-        clause_row = Clause(
-            agreement_id=agreement.id,
-            text=clause_item.text,
-            category=clause_item.category,
-            risk=clause_item.risk,
-            explanation=clause_item.explanation,
-            suggestion=clause_item.suggestion,
-        )
-        db.add(clause_row)
-
-    # Update top-level agreement analysis fields
-    agreement.summary = analysis_result.summary
-    agreement.overall_risk = analysis_result.overall_risk
-    agreement.missing_protections = analysis_result.missing_protections
-    agreement.status = "analyzed"
-
-    db.commit()
-    db.refresh(agreement)
-    return agreement
 
 
 def get_agreement_history(
