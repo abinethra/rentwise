@@ -63,6 +63,65 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         ) from e
 
 
+CHUNK_SIZE = 64 * 1024  # 64 KB memory-safe streaming chunks
+
+
+def detect_file_type_magic_bytes(header: bytes) -> str:
+    """
+    Validates file signatures (magic bytes) to prevent MIME spoofing attacks.
+    Returns document category ('pdf' or 'photo') or raises HTTP 415.
+    """
+    if header.startswith(b"%PDF-"):
+        return "pdf"
+    if header.startswith(b"\xff\xd8\xff"):
+        return "photo"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "photo"
+    if len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        return "photo"
+    raise HTTPException(
+        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        detail="Invalid file signature (magic bytes). The file content does not match genuine PDF or image data.",
+    )
+
+
+async def read_and_validate_file_stream(file: UploadFile, max_bytes: int) -> tuple[bytes, str]:
+    """
+    Streams file in memory-efficient 64KB chunks to prevent RAM exhaustion / OOM crashes.
+    Aborts immediately with HTTP 413 if stream exceeds max_bytes limit.
+    Inspects magic bytes on first chunk to guarantee payload authenticity.
+    """
+    chunks = []
+    total_bytes = 0
+    first_chunk = True
+    doc_category = ""
+
+    while True:
+        chunk = await file.read(CHUNK_SIZE)
+        if not chunk:
+            break
+
+        if first_chunk:
+            doc_category = detect_file_type_magic_bytes(chunk)
+            first_chunk = False
+
+        total_bytes += len(chunk)
+        if total_bytes > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File exceeds maximum allowed size of {max_bytes // (1024 * 1024)}MB. Upload stream terminated.",
+            )
+        chunks.append(chunk)
+
+    if total_bytes == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded file is completely empty.",
+        )
+
+    return b"".join(chunks), doc_category
+
+
 @router.post(
     "",
     response_model=TextExtractionResponse,
@@ -74,12 +133,13 @@ async def upload_and_extract_agreement(
     db: Session = Depends(get_db),
 ):
     """
-    Stage 1 Upload Endpoint:
-    1. Validates file MIME type (PDF or image).
-    2. Validates file size against MAX_FILE_SIZE_BYTES limit (treats upload as untrusted input).
-    3. Extracts text using pypdf for PDFs or Gemini Vision for photos.
-    4. Persists the agreement and raw text into SQLite.
-    5. Returns extraction summary and text preview.
+    Stage 1 Upload Endpoint (Hardened with Streaming & Magic-Byte Validation):
+    1. Validates declared client MIME type.
+    2. Streams file in 64KB chunks to prevent RAM exhaustion.
+    3. Validates binary magic-bytes on first chunk to block spoofed executables.
+    4. Extracts text using pypdf for PDFs or Gemini Vision for photos.
+    5. Persists the agreement and raw text into SQLite.
+    6. Returns extraction summary and text preview.
     """
     content_type = (file.content_type or "").lower()
     if content_type not in ALLOWED_MIME_TYPES:
@@ -88,22 +148,10 @@ async def upload_and_extract_agreement(
             detail=f"Unsupported file type '{content_type}'. Allowed types are PDF, JPEG, PNG, and WEBP.",
         )
 
-    # Read file bytes in memory with strict size check to prevent memory exhaustion attacks
-    file_bytes = await file.read()
-    if len(file_bytes) == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The uploaded file is completely empty.",
-        )
+    # Stream file safely with instant size cut-off and magic byte validation
+    file_bytes, doc_category = await read_and_validate_file_stream(file, settings.max_file_size_bytes)
 
-    if len(file_bytes) > settings.max_file_size_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds maximum allowed size of {settings.max_file_size_bytes // (1024 * 1024)}MB.",
-        )
-
-    # Route extraction by document category
-    doc_category = ALLOWED_MIME_TYPES[content_type]
+    # Route extraction by verified document category
     extracted_text: str = ""
 
     if doc_category == "pdf":

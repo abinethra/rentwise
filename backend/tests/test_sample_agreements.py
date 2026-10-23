@@ -60,6 +60,38 @@ def test_upload_empty_file_rejected():
     assert "empty" in response.json()["detail"].lower()
 
 
+def test_upload_spoofed_mime_type_rejected_by_magic_bytes():
+    """
+    Improvement 1 Security Verification:
+    Tests that a spoofed file with fake Content-Type: application/pdf is rejected
+    if its binary payload does not start with %PDF- magic bytes.
+    """
+    spoofed_exe = io.BytesIO(b"MZ\x90\x00\x03\x00\x00\x00NotARealPdfPayload")
+    response = client.post(
+        "/agreements",
+        files={"file": ("spoofed_document.pdf", spoofed_exe, "application/pdf")},
+    )
+    assert response.status_code == 415
+    assert "magic bytes" in response.json()["detail"].lower()
+
+
+def test_upload_streaming_size_limit_abort():
+    """
+    Improvement 1 Security Verification:
+    Tests that chunked streaming terminates with HTTP 413 without buffering excess bytes.
+    """
+    # Create stream exceeding the 10MB limit (e.g. 11MB)
+    eleven_mb = b"%PDF-" + b"A" * (11 * 1024 * 1024)
+    oversized_file = io.BytesIO(eleven_mb)
+    response = client.post(
+        "/agreements",
+        files={"file": ("oversized_lease.pdf", oversized_file, "application/pdf")},
+    )
+    assert response.status_code == 413
+    assert "exceeds maximum allowed size" in response.json()["detail"].lower()
+
+
+
 @pytest.mark.parametrize("sample", SAMPLE_AGREEMENTS)
 def test_sample_agreements_schema_and_risk(sample):
     """
