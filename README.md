@@ -127,8 +127,6 @@ flowchart LR
 | Document parsing | `pypdf`, Gemini vision for photos |
 | Deployment | Vercel (frontend), Render (backend) |
 
-> Update this table to match exactly what your repository uses.
-
 ---
 
 ## 📁 Project Structure
@@ -155,9 +153,6 @@ rentwise/
 │   └── .env.example
 └── README.md
 ```
-
-> Adjust this tree to match your actual folders.
-
 ---
 
 ## 🚀 Getting Started
